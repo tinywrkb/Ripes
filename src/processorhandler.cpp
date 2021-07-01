@@ -1,7 +1,6 @@
 #include "processorhandler.h"
 
 #include "processorregistry.h"
-#include "processors/interface/ripesprocessor.h"
 #include "processors/ripesvsrtlprocessor.h"
 #include "ripessettings.h"
 #include "statusmanager.h"
@@ -62,6 +61,10 @@ ProcessorHandler::ProcessorHandler() {
 
     m_syscallManager = std::make_unique<RISCVSyscallManager>();
     m_constructing = false;
+}
+
+bool ProcessorHandler::isVSRTLProcessor() {
+    return static_cast<bool>(dynamic_cast<const RipesVSRTLProcessor*>(getProcessor()));
 }
 
 void ProcessorHandler::_loadProgram(const std::shared_ptr<Program>& p) {
@@ -146,19 +149,6 @@ void ProcessorHandler::_clock() {
 void ProcessorHandler::_run() {
     ProcessorStatusManager::setStatus("Running...");
     emit runStarted();
-    /** We create a cycleFunctor for running the design which will stop further running of the design when:
-     * - The user has stopped running the processor (m_stopRunningFlag)
-     * - the processor has finished executing
-     * - the processor has hit a breakpoint
-     */
-    const auto& cycleFunctor = [=] {
-        bool stopRunning = m_stopRunningFlag;
-        stopRunning |= _checkBreakpoint() || m_currentProcessor->finished() || m_stopRunningFlag;
-
-        if (stopRunning) {
-            m_vsrtlWidget->stop();
-        }
-    };
 
     // Start running through the VSRTL Widget interface
     connect(&m_runWatcher, &QFutureWatcher<void>::finished, [=] {
@@ -167,7 +157,22 @@ void ProcessorHandler::_run() {
     });
     connect(&m_runWatcher, &QFutureWatcher<void>::finished, [=] { ProcessorStatusManager::clearStatus(); });
 
-    m_runWatcher.setFuture(m_vsrtlWidget->run(cycleFunctor));
+    m_runWatcher.setFuture(QtConcurrent::run([=] {
+        auto* vsrtl_proc = dynamic_cast<vsrtl::SimDesign*>(m_currentProcessor.get());
+
+        if (vsrtl_proc) {
+            vsrtl_proc->setEnableSignals(false);
+        }
+
+        while (!(_checkBreakpoint() || m_currentProcessor->finished() || m_stopRunningFlag)) {
+            m_currentProcessor->clockProcessor();
+        }
+
+        if (vsrtl_proc) {
+            vsrtl_proc->setEnableSignals(true);
+        }
+        emit runFinished();
+    }));
 }
 
 void ProcessorHandler::_setBreakpoint(const AInt address, bool enabled) {
