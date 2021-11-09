@@ -14,8 +14,7 @@ project(Ripes CXX)
 # Error flags on everything but MSVC
 if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "-Wextra -Wall \
-        -Werror=switch -Werror=return-type -Werror=shadow \
-        -Werror=unreachable-code")
+        -Werror=switch -Werror=return-type -Werror=shadow")
 endif()
 
 if(MSVC)
